@@ -1,0 +1,530 @@
+library(tidyverse)
+library(RColorBrewer)
+library(viridis)
+library(sf)
+library(jsonlite)
+library(geojsonio)
+library(ineq)
+library(broom)
+#To import .sav
+library(foreign)
+data_ <- read.spss("C:/Users/andre/OneDrive/Desktop/Tesi/Senzatitolo2.sav", to.data.frame = TRUE) 
+
+#We want to take a look at the format of the variables in the dataframe in order to know if we need to manipulate them while proceeding.
+summary(data_)
+
+#We are creating a new column in which is specified if the citizenship of a certain record is italian or not.
+#It is important to make sure that the comparison between the "Citizenship" column and the "Italy" string is case insensitive
+#(In this regard, we use the tolower function).
+data_ <- data_ %>%
+  mutate(Cittadinanza = str_trim(Cittadinanza), #Str_trim is used to remove excess whitespace from a string.
+         ITAorNOT = ifelse(tolower(Cittadinanza) == "italia", "Italians", "Foreigners"))
+
+#The following table is created in order to view the number of foreigners divided by citizenship and year of analysis
+segregation_by_year <- data_ %>%
+  group_by(Anno, Cittadinanza) %>%
+  summarise(Totale_Residenti = sum(Residenti, na.rm = TRUE)) #na.rm is set to TRUE in order to perform the calculations while ignoring any missing values (NA) in the data.
+
+#Then, we create a new table in which we count the number and the percentage of foreigners divided by year
+foreigners_table <- data_ %>%
+  group_by(Anno) %>%
+  summarise(Number_of_residents = sum(Residenti, na.rm = TRUE),
+            Italian_residents = sum(ifelse(ITAorNOT == "Italians", Residenti, 0)),
+            Foreign_residents = sum(ifelse(ITAorNOT == "Foreigners", Residenti, 0)),
+            Foreigner_ratio = sum(ifelse(ITAorNOT == "Foreigners", Residenti, 0)) / sum(Residenti) * 100)
+
+#We want to take a look at the format of the variables in the dataframe in order to know if we need to manipulate them while proceeding.
+summary(foreigners_table)
+
+#To better visualize the entries in the graph to follow, we make it so that when the number of residents exceeds one million, 
+#we divide the number by one million and display the first two decimal places with an "M" at the end (intended to indicate one million).
+#If less than one million, the number is instead divided by 100 and followed by a "K" (aimed at indicating thousands).
+foreigners_table$for_the_label_italians = ifelse(foreigners_table$Italian_residents/1000000 >= 1,
+                                                  paste0(round(foreigners_table$Italian_residents/1000000, 2), "M"),
+                                                  paste0(foreigners_table$Italian_residents/1000, "K"))
+
+#We repeat the calculation for items related to foreigners.
+foreigners_table$for_the_label_foreigners = ifelse(foreigners_table$Foreign_residents/1000000 >= 1,
+                                                  paste0(round(foreigners_table$Foreign_residents/1000000, 2), "M"),
+                                                  paste0(round(foreigners_table$Foreign_residents/1000, 0), "K"))
+
+#Now let's create a line graph depicting data on the number of Italian and foreign residents by year.
+ggplot(foreigners_table, aes(x = Anno, y = Number_of_residents)) + 
+  geom_line(aes(y = Italian_residents, color = "Italians"), linewidth = 1) +
+  geom_line(aes(y = Foreign_residents, color = "Foreigners"), linewidth = 1) +
+  geom_point(aes(y = Italian_residents, color = "Italians"), size = 2) +
+  geom_point(aes(y = Foreign_residents, color = "Foreigners"), size = 2) +
+  geom_text(aes(x = Anno, y = Italian_residents, label = for_the_label_italians, color = "black"), vjust = 1.5, size = 3) +
+  geom_text(aes(x = Anno, y = Foreign_residents, label = for_the_label_foreigners, color = "black"), vjust = 1.5, size = 3) +
+  labs(title = "Fig.1 - Number of italian and 
+       foreign residents (by Year)",
+       x = "Year",
+       y = "Total number of residents") +
+  theme_minimal() +
+  theme(legend.position = "right",
+        legend.key.size = unit(0.02, "cm"),
+        legend.text = element_text(size=8),
+        axis.title.x = element_text(vjust=0, size=15, face="italic"),  
+        axis.title.y = element_text(vjust = 2, size = 15, face="italic"),
+        plot.title=element_text(hjust = 0.5, face="bold", size=20),
+        axis.text = element_text(size = 8.5),
+        plot.background = element_rect(fill = 'white', color = 'white'),
+        panel.grid.major.y = element_line(color = "#bdbdbd"),
+        panel.grid.major.x = element_line(color = "#bdbdbd")) +
+  scale_color_manual(values = c("Italians" = "#fb6a4a", "Foreigners" = "#045a8d")) +
+  scale_x_continuous(breaks = unique(foreigners_table$Anno)) +
+  scale_y_continuous(breaks = seq(0, 1300000, 100000)) +
+  guides(color = guide_legend(title = NULL))
+
+#We can then save the plot as a proper HD png with the following function:
+ggsave("numberofitalians&foreigners.png", width = 12, height = 6, dpi = 300)
+
+#Now, we create a new column in which the percentages are visualized with two decimal digits and the "%" symbol in the end.
+#We're doing this to better visualize labels within the following graph.
+foreigners_table$Foreign_percentage <- paste0(round(foreigners_table$Foreigner_ratio, 2), "%")
+
+#In the following graph we see how the percentage of foreigners in Milan has changed over the years.
+ggplot(foreigners_table, aes(x = Anno, y = Foreigner_ratio, label = Foreign_percentage)) +
+  geom_bar(stat = "identity", aes(fill = Foreigner_ratio), width = 0.55) +
+  geom_text(vjust = -0.65, hjust = 0.5, size=3, color='black') +
+  labs(title = "Fig.2 - % of foreigners (by Year)",
+       x = "Year",
+       y = "% of foreigners") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.title.x = element_text(vjust=0, size=15, face="italic"), 
+        axis.title.y = element_text(vjust = 2, size = 15, face="italic"),
+        plot.title=element_text(hjust = 0.5, face="bold", size=20),
+        axis.text = element_text(size = 9),
+        plot.background = element_rect(fill = 'white', color = 'white'),
+        panel.grid.major.y = element_line(color = "#bdbdbd")) +
+  scale_fill_gradient(low = "#bdc9e1", high = "#045a8d") +
+  scale_x_continuous(breaks = unique(foreigners_table$Anno)) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1))
+
+# We can then save the plot as a proper HD png with the following function:
+ggsave("foreigners_percentage.png", width = 12, height = 6, dpi = 300)
+
+# Let's filter the data only for the year 2022 and for foreign residents
+data_2022 <- filter(data_, Anno == 2022, ITAorNOT == "Foreigners")
+#Let's group by foreign community and sum the number of residents
+#We want to consider only the top 10 ethnic groups in the city of Milan
+ten_ethnic_groups <- data_2022 %>%
+  group_by(Cittadinanza) %>%
+  summarise(Totale_Residenti = sum(Residenti)) %>%
+  arrange(desc(Totale_Residenti)) %>%
+  head(10)
+
+#We filter data only for the 10 communities with the largest presence in 2022
+top_10_communities <- ten_ethnic_groups$Cittadinanza
+#And then we remove the aforementioned filter
+data_top_10 <- filter(data_, Cittadinanza %in% top_10_communities)
+#We filter data only for the 10 communities with the largest presence in 2022 and put it in a dataframe
+data_top_10_2022 <- filter(segregation_by_year, Anno == 2022, Cittadinanza %in% top_10_communities)
+#And then we remove the aforementioned filter
+data_top_10_every_year <- filter(segregation_by_year, Cittadinanza %in% top_10_communities)
+#Now we have to bind the two tables
+top10data <- bind_rows(data_top_10_every_year, data_top_10_2022)
+
+#Let's take a look at every variable's format within the table we have just created
+summary(top10data)
+
+#In order to have labels in english, we need to translate manually each of the ten ethnic groups taken into account.
+top10data <- top10data %>%
+  mutate(Cittadinanza = recode(Cittadinanza, "Filippine" = "Philippines"), 
+         Cittadinanza = recode(Cittadinanza, "Perù" = "Perù"), 
+         Cittadinanza = recode(Cittadinanza, "Ecuador" = "Ecuador"), 
+         Cittadinanza = recode(Cittadinanza, "Bangladesh" = "Bangladesh"),
+         Cittadinanza = recode(Cittadinanza, "Ucraina" = "Ukraine"),
+         Cittadinanza = recode(Cittadinanza, "Romania" = "Romania"),
+         Cittadinanza = recode(Cittadinanza, "Egitto" = "Egypt"), 
+         Cittadinanza = recode(Cittadinanza, "Marocco" = "Morocco"),
+         Cittadinanza = recode(Cittadinanza, "Cinese, Rep. Popolare" = "China"),
+         Cittadinanza = recode(Cittadinanza, "Sri Lanka (ex Ceylon)" = "Sri Lanka"))
+
+#Let's do the same thing for the first dataset we used
+data_ <- data_ %>%
+  mutate(Cittadinanza = recode(Cittadinanza, "Filippine" = "Philippines"), 
+         Cittadinanza = recode(Cittadinanza, "Perù" = "Perù"), 
+         Cittadinanza = recode(Cittadinanza, "Ecuador" = "Ecuador"), 
+         Cittadinanza = recode(Cittadinanza, "Bangladesh" = "Bangladesh"),
+         Cittadinanza = recode(Cittadinanza, "Ucraina" = "Ukraine"),
+         Cittadinanza = recode(Cittadinanza, "Romania" = "Romania"),
+         Cittadinanza = recode(Cittadinanza, "Egitto" = "Egypt"), 
+         Cittadinanza = recode(Cittadinanza, "Marocco" = "Morocco"),
+         Cittadinanza = recode(Cittadinanza, "Cinese, Rep. Popolare" = "China"),
+         Cittadinanza = recode(Cittadinanza, "Sri Lanka (ex Ceylon)" = "Sri Lanka"))
+
+#The next diagram consists of 10 different line graphs, 
+#each depicting the trend in the number of residents belonging to each ethnic group from 1999 to 2022
+set.seed(10)
+ggplot(top10data, aes(x = Anno, y = Totale_Residenti, color = Totale_Residenti)) +
+  geom_point(aes(color = Totale_Residenti), show.legend = FALSE, size = 1.5) +
+  facet_wrap(~Cittadinanza, strip.position = "top", ncol = 5) +
+  scale_color_gradient(low = "#fec44f", high = "#cb181d") +
+  theme(strip.placement = "outside") +  
+  labs(
+    title = "Fig.3 - Residents 
+    (by Year and by Citizenship)",
+    x = "Year",
+    y = "Amount of residents",
+    color = "Cittadinanza"
+  ) +
+  theme_minimal() +
+  theme(axis.title.x = element_text(vjust = 0, size = 15, face = "italic"),  
+                        axis.title.y = element_text(vjust = 2, size = 15, face = "italic"),
+                        plot.title = element_text(hjust = 0.5, face = "bold", size = 20),
+                        axis.text = element_text(size = 9),
+                        plot.background = element_rect(fill = 'white', color = 'white'),
+                        panel.grid.major.y = element_line(color = "#bdbdbd"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1)) 
+
+# We can then save the plot as a proper HD png with the following function:
+ggsave("ten_ethnic_groups.png", width = 12, height = 6, dpi = 300)
+
+#Now we want to know in which nil foreigners are stationing the most (in 2022)
+data_2022_ <- filter(data_, Anno == 2022)
+foreigner_counts_2022 <- data_2022_ %>%
+  filter(ITAorNOT == "Foreigners") %>%
+  group_by(IdNil, Nil) %>%
+  summarise(Total_Foreign_Residents_2022 = sum(Residenti))
+
+#Now we want to know in which nil all the inhabitants are stationing the most (in 2022)
+total_counts_2022 <- data_2022_ %>%
+  group_by(IdNil, Nil) %>%
+  summarise(Total_Residents_2022 = sum(Residenti))
+
+#And now we are merging the two dataframes in order to show the percentage of foreigners residing in each Nil.
+merged_data_2022 <- left_join(total_counts_2022, foreigner_counts_2022, by = "IdNil")
+merged_data_2022 <- merged_data_2022 %>%
+  mutate(Percentage_Foreigners_2022 = (Total_Foreign_Residents_2022 / Total_Residents_2022) * 100)
+
+#We choose only Nil inhabited by more than 1000 people to avoid too small samples.
+merged_data_2022 <- filter(merged_data_2022, Total_Residents_2022 > 1000)
+
+geojson = geojson_read("https://dati.comune.milano.it/dataset/e5a0d956-2eff-454d-b0ea-659cb7b55c0b/resource/af78bd3f-ea45-403a-8882-91cca05087f0/download/nilzone.geojson", what = "sp")
+str(geojson)
+library(broom)
+geojson_data <- tidy(geojson)
+
+#We are going to manually assign every NIL the right Id in order to join the table we just computed to the ones made before.
+geojson_data <- geojson_data %>%
+  mutate(id_nil = case_when(id == 1 ~ 74, id == 2 ~ 82, id == 3 ~ 75, id == 4 ~ 66,
+    id == 5 ~ 29, id == 6 ~ 72, id == 7 ~ 18, id == 8 ~ 65, id == 9 ~ 60, id == 10 ~ 70,
+    id == 11 ~ 55, id == 12 ~ 61, id == 13~ 53, id == 14~ 49, id == 15~ 45, id == 16~ 48,
+    id == 17~ 43, id == 18~ 73, id == 19~ 76, id == 20~ 80, id == 21~ 19, id == 22~ 37, 
+    id == 23~ 17, id == 24~ 78, id == 25~ 28, id == 26~ 32, id == 27~ 25, id == 28~ 22, 
+    id == 29~ 57, id == 30~ 31, id == 31 ~ 14, id == 32 ~ 42, id == 33 ~ 4, id == 34 ~ 2, 
+    id == 35 ~ 1, id == 36 ~ 36, id == 37 ~ 7, id == 38 ~ 81, id == 39 ~ 35, id == 40~ 23,
+    id == 41~ 46, id == 42~ 83, id == 43~ 64, id == 44~ 41, id == 45~ 63, id == 46~ 62,
+    id == 47~ 87, id == 48~ 61, id == 49~ 77, id == 50~ 79, id == 51~ 84, id == 52~ 15,
+    id == 53~ 54, id == 54~ 67, id == 55~ 59, id == 56~ 3, id == 57~ 50, id == 58~ 44,
+    id == 59~ 26, id == 60~ 21, id == 61~ 39, id == 62~ 40, id == 63~ 34, id == 64~ 85,
+    id == 65~ 33, id == 66~ 30, id == 67~ 38, id == 68~ 16, id == 69~ 10, id == 70~ 13,
+    id == 71~ 20, id == 72~ 24, id == 73~ 12, id == 74~ 11, id == 75~ 69, id == 76~ 58, 
+    id == 77~ 51, id == 78~ 52, id == 79~ 56, id == 80~ 5, id == 81~ 88, id == 82~ 27,
+    id == 83~ 5, id == 84~ 6, id == 85~ 47, id == 86 ~ 86, id == 87 ~ 68, id == 88 ~ 9,
+    TRUE ~ NA_real_  # Valore di default se nessuna delle condizioni è vera
+  ))
+
+ggplot() +
+  geom_polygon(data = geojson_data, aes(x = long, y = lat, group = group), fill = "#bdc9e1", color = "black") +
+  labs(
+    title = "Fig.4 - NILs"
+  ) +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 20)) +
+  coord_map() #projects a portion of the earth, which is approximately spherical, onto a flat 2D plane
+# We can then save the plot as a proper HD png with the following function:
+ggsave("NILs.png", width = 12, height = 6, dpi = 300)
+
+#We find the unique values of IdNil in the tables involved.
+unique_ids_merged <- unique(merged_data_2022$IdNil)
+unique_ids_geojson <- unique(geojson_data$id_nil)
+#We check if there are common IdNils between the tables
+common_ids <- intersect(unique_ids_merged, unique_ids_geojson)
+common_ids
+
+#We filter merged_data_2022 keeping only common NILs with spdf_fortified.
+filtered_gejson_data <- geojson_data %>%
+  filter(id_nil %in% common_ids)
+
+#We bind together the two tables
+merged_map_data <- left_join(filtered_gejson_data, merged_data_2022, by = c("id_nil" = "IdNil")) 
+
+#We create a color palette we'll use in the two following maps
+color_palette <- c("#78c679", "#addd8e", "#d9f0a3", "#f7fcb9", "#ffeda0", "#fed976", 
+                   "#feb24c", "#fd8d3c", "#fc4e2a", "#ef3b2c", "#cb181d") 
+
+#We are creating a map in which the NILs are colored differently based on their percentage of foreigners
+ggplot(merged_map_data, aes(x = long, y = lat, group = group, fill = Percentage_Foreigners_2022)) +
+  geom_polygon(color = "black") +
+  scale_fill_gradientn(colors = color_palette, values = scales::rescale(c(0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60))) +
+  theme_void() +
+  coord_map() +
+  labs(title = "Fig.6 - % of foreigners 
+       by NIL (2022)") +
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size=8), 
+    axis.title.x = element_blank(),   
+    axis.title.y = element_blank(),   
+    axis.text.x = element_blank(),    
+    axis.text.y = element_blank(),     
+    plot.title = element_text(hjust = 0.5, size = 20)
+  )
+ggsave("ForeignersByNIL.png", width = 12, height = 6, dpi = 300)
+
+#We repeat the same process we made before to do a map which involves only the top 1o ethnic groups.
+data_top_10_ <- filter(data_top_10, Anno == 2022)
+
+data_top_10_ <- data_top_10_ %>%
+  group_by(IdNil, Nil) %>%
+  summarise(Residents = sum(Residenti))
+
+merged_top10_2022 <- left_join(total_counts_2022, data_top_10_, by = "IdNil")
+merged_top10_2022 <- merged_top10_2022 %>%
+  mutate(Percentage_Top10_2022 = (Residents / Total_Residents_2022) * 100)
+
+#We choose only the Nils inhabited by more than 1000 people to avoid too small samples.
+merged_top10_2022 <- filter(merged_top10_2022, Total_Residents_2022 > 1000)
+
+#We bind together the two tables
+merged_map_top10 <- left_join(filtered_gejson_data, merged_top10_2022, by = c("id_nil" = "IdNil"))
+
+#We are creating a map in which the NILs are colored differently based on their percentage of foreigners from the top 10 ethnic groups
+ggplot(merged_map_top10, aes(x = long, y = lat, group = group, fill = Percentage_Top10_2022)) +
+  geom_polygon(color = "black") +
+  scale_fill_gradientn(colors = color_palette, values = scales::rescale(c(0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60))) +
+  theme_void() +
+  coord_map() +
+  labs(title = "Fig.7 - % of foreigners 
+       by NIL (2022)") +
+  theme(
+    legend.title = element_blank(),
+    legend.text = element_text(size=8), 
+    axis.title.x = element_blank(),   
+    axis.title.y = element_blank(),   
+    axis.text.x = element_blank(),    
+    axis.text.y = element_blank(),     
+    plot.title = element_text(hjust = 0.5, size = 20)
+  )
+ggsave("TopTenByNIL.png", width = 12, height = 6, dpi = 300)
+
+#We define the list of IdNils that match "Yes" for the "Central_Nil" column.
+central_nil_ids <- c(1, 2, 3, 4, 5, 6, 7, 8, 9, 21, 26, 27, 44, 50, 51, 59, 67, 68, 69)
+#We add the column "Central_Nil" to the dataframe.
+data__ <- data_ %>%
+  mutate(Central_Nil = if_else(IdNil %in% central_nil_ids, "Yes", "No"))
+
+#We filter the data by foreign residents.
+foreigners_data <- data__ %>% filter(ITAorNOT == "Foreigners")
+#We create the count table for foreign residents in central and suburban nil for each year.
+count_table <- foreigners_data %>%
+  group_by(Anno, Central_Nil = if_else(IdNil %in% central_nil_ids, "Central NILs", "Peripheral NILs")) %>%
+  summarise(Total_Foreign_Residents = sum(Residenti, na.rm = TRUE))
+
+#We'll now create a bar graph in which is represented the amount of foreign people residing in the centre and in the periphery of the city.
+ggplot(count_table, aes(x = Anno, y = Total_Foreign_Residents, fill = Central_Nil)) + 
+  geom_bar(stat = "identity", color = "black") +
+  labs(title = "Fig.8 - Number of Residents divided 
+  by Year and by NIL centrality",
+       x = "Year",
+       y = "Number of foreigners") +
+  theme_minimal() +
+  theme(legend.position = "right",
+        legend.key.size = unit(0.4, "cm"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=8),
+        axis.title.x = element_text(vjust=0, size=15, face="italic"),  
+        axis.title.y = element_text(vjust = 2, size = 15, face="italic"),
+        plot.title=element_text(hjust = 0.5, face="bold", size=20),
+        axis.text = element_text(size = 9),
+        plot.background = element_rect(fill = 'white', color = 'white'),
+        panel.grid.major.y = element_line(color = "#bdbdbd"),
+        panel.grid.major.x = element_line(color = "#bdbdbd")) +
+  scale_fill_manual(values = c("Central NILs" = "#9ecae1", "Peripheral NILs" = "#9e9ac8"))  +
+  scale_x_continuous(breaks = unique(foreigners_table$Anno)) +
+  scale_y_continuous(labels = scales::comma)
+ggsave("Central_NIL.png", width = 12, height = 6, dpi = 300)
+
+#Now we'll apply the same process based on the top 10 ethnic groups
+data_top_10__ <- data_top_10 %>%
+  mutate(Central_Nil = if_else(IdNil %in% central_nil_ids, "Yes", "No"))
+count_top10_table <- data_top_10__ %>%
+  group_by(Anno, Central_Nil = if_else(IdNil %in% central_nil_ids, "Central NILs", "Peripheral NILs")) %>%
+  summarise(Total_Foreign_Residents = sum(Residenti, na.rm = TRUE))
+
+#And the bar graph:
+ggplot(count_top10_table, aes(x = Anno, y = Total_Foreign_Residents, fill = Central_Nil)) + 
+  geom_bar(stat = "identity", color = "black") +
+  labs(title = "Fig.9 - Number of Residents divided by Year 
+       and by NIL centrality (Top 10 ethnic groups)",
+       x = "Year",
+       y = "Number of foreigners") +
+  theme_minimal() +
+  theme(legend.position = "right",
+        legend.key.size = unit(0.4, "cm"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=8),
+        axis.title.x = element_text(vjust=0, size=15, face="italic"),  
+        axis.title.y = element_text(vjust = 2, size = 15, face="italic"),
+        plot.title=element_text(hjust = 0.5, face="bold", size=20),
+        axis.text = element_text(size = 9),
+        plot.background = element_rect(fill = 'white', color = 'white'),
+        panel.grid.major.y = element_line(color = "#bdbdbd"),
+        panel.grid.major.x = element_line(color = "#bdbdbd")) +
+  scale_fill_manual(values = c("Central NILs" = "#fed976", "Peripheral NILs" = "#fc8d59"))  +
+  scale_x_continuous(breaks = unique(foreigners_table$Anno)) +
+  scale_y_continuous(breaks = seq(0, 200000, 100000), labels = scales::comma) 
+ggsave("Central_NIL_Top10.png", width = 12, height = 6, dpi = 300)
+
+#Now we move into the meat of the project and calculate the Gini index of each of the top 10 communities.
+#List of top 10 foreign communities.
+top_10_communities <- c("Philippines", "Perù", "Ecuador", "Bangladesh", "Ukraine", 
+                        "Romania", "Egypt", "Morocco", "China", "Sri Lanka")
+
+#Initialize a dataframe to store the results.
+dissimilarity_results <- data.frame(Anno = integer(), Cittadinanza = character(), Dissimilarity = numeric())
+
+#We Iterate on each year.
+for (year in unique(data_$Anno)) {
+  #Filter data for the current year.
+  data_year <- filter(data_, Anno == year)
+  #Iterate on every Citizenship.
+  for (citizenship in top_10_communities) {
+    #Filter data by Current Citizenship
+    data_citizenship <- filter(data_year, Cittadinanza == citizenship)
+    #Extract resident counts for foreign community
+    counts_foreign <- data_citizenship %>%
+      filter(Cittadinanza == citizenship) %>%
+      select(Residenti)
+    #Calculate the Gini dissimilarity index only if there are at least two communities present.
+    if (nrow(counts_foreign) > 1) {
+      gini_result <- ineq::Gini(counts_foreign$Residenti)
+      #Store the results
+      dissimilarity_results <- bind_rows(dissimilarity_results, data.frame(Anno = year, Cittadinanza = citizenship, Dissimilarity = gini_result))
+    }
+  }
+}
+
+#Conversion of Dissimilarity to numeric.
+dissimilarity_results$Dissimilarity <- as.numeric(dissimilarity_results$Dissimilarity)
+
+#The next diagram consists of 10 different line graphs, 
+#each depicting the trend in the Gini dissimilarity index belonging to each ethnic group from 1999 to 2022
+set.seed(10)
+ggplot(dissimilarity_results, aes(x = Anno, y = Dissimilarity, fill = Dissimilarity)) +
+  geom_line(aes(color = Dissimilarity), size = 2) +
+  facet_wrap(~Cittadinanza, strip.position = "top", ncol = 5) +
+  scale_color_gradient(low = "#74c476", high = "#fd8d3c") +
+  theme(strip.placement = "outside") +  
+  labs(
+    title = "Fig.10 - Gini Index 
+    (by Year and by Citizenship)",
+    x = "Year",
+    y = "Gini Index",
+    color = "Cittadinanza"
+  ) +
+  theme_minimal() +
+  theme(legend.title = element_blank(),
+        legend.key.size = unit(0.4, "cm"),
+        legend.text = element_text(size=8),
+        axis.title.x = element_text(vjust = 0, size = 15, face = "italic"),  
+        axis.title.y = element_text(vjust = 2, size = 14, face = "italic"),
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 20),
+        axis.text = element_text(size = 6),
+        plot.background = element_rect(fill = 'white', color = 'white'),
+        panel.grid.major.y = element_line(color = "#bdbdbd"),
+        panel.border = element_rect(color = "black", fill = NA, size = 1)) 
+ggsave("GiniIndex.png", width = 12, height = 6, dpi = 300)
+
+# Filter data for the year 2022
+data_2022 <- filter(data_, Anno == 2022)
+
+Nil_sum <- data_2022 %>%
+  group_by(IdNil, Nil) %>%
+  summarise(Residenti = sum(Residenti))
+
+#Group by NIL and ethnicity, and calculate the percentage of each ethnic group in each NIL
+ethnicity <- data_2022 %>%
+  group_by(IdNil, Nil, Cittadinanza) %>%
+  summarise(Residenti = sum(Residenti, na.rm = TRUE))
+
+#We choose only the Nils inhabited by more than 1000 people to avoid too small samples.
+filter_ethnicity <- filter(Nil_sum, Residenti > 1000)
+
+#We bind together the two tables
+merged_ethnicity <- left_join(filter_ethnicity, ethnicity, by = c("IdNil" = "IdNil"))
+
+#We calculate the percentage of foreigners from each of the 10 ethnic groups in a specific NIL
+ethnicity_percentage <- merged_ethnicity %>%
+  group_by(IdNil, Nil.x, Cittadinanza) %>%
+  summarise(Percentage_ethnicty = Residenti.y/Residenti.x *100)
+
+# Calculate the overall percentage of each ethnic group in the entire dataset for the year 2022
+overall <- data_2022 %>%
+  group_by(Cittadinanza) %>%
+  summarise(Residenti = sum(Residenti), Tot_Residenti = sum(data_2022$Residenti))
+
+#We calculate the percentage of foreigners from each ethnic groups in the entire city
+overall_percentage <- overall %>%
+  group_by(Cittadinanza) %>%
+  summarise(Percentage_overall = Residenti/Tot_Residenti*100)
+
+# Merge the two datasets to get the overall percentage for each ethnic group in each row
+ethnicity_percentage_ <- inner_join(ethnicity_percentage, overall_percentage, by = "Cittadinanza")
+
+# Calculate the location quotient (LQ)
+LQ <- ethnicity_percentage_ %>%
+  mutate(LocationQuotient = Percentage_ethnicty / Percentage_overall)
+
+#We translate the citizenship in english 
+ten_ethnic_groups <- ten_ethnic_groups %>%
+  mutate(Cittadinanza = recode(Cittadinanza, "Filippine" = "Philippines"), 
+         Cittadinanza = recode(Cittadinanza, "Perù" = "Perù"), 
+         Cittadinanza = recode(Cittadinanza, "Ecuador" = "Ecuador"), 
+         Cittadinanza = recode(Cittadinanza, "Bangladesh" = "Bangladesh"),
+         Cittadinanza = recode(Cittadinanza, "Ucraina" = "Ukraine"),
+         Cittadinanza = recode(Cittadinanza, "Romania" = "Romania"),
+         Cittadinanza = recode(Cittadinanza, "Egitto" = "Egypt"), 
+         Cittadinanza = recode(Cittadinanza, "Marocco" = "Morocco"),
+         Cittadinanza = recode(Cittadinanza, "Cinese, Rep. Popolare" = "China"),
+         Cittadinanza = recode(Cittadinanza, "Sri Lanka (ex Ceylon)" = "Sri Lanka"))
+
+# Filter data only for the top 10 ethnic groups
+top_10_communities <- ten_ethnic_groups$Cittadinanza
+ethnicity_percentage_top10 <- filter(LQ, Cittadinanza %in% top_10_communities)
+
+#We bind together the two tables
+merged_map_LQ <- left_join(filtered_gejson_data, ethnicity_percentage_top10, by = c("id_nil" = "IdNil"))
+
+#We create a color scale in order to better visualize the following maps
+color_scale <- c("#3f007d", "#54278f", "#6a51a3", "#0570b0", "#3690c0", "#74a9cf",
+                 "#a6bddb", "#d0d1e6", "#d9f0a3", "#addd8e", "#78c679", "#addd8e", 
+                 "#d9f0a3", "#f7fcb9", "#ffeda0", "#fed976", "#feb24c", "#fd8d3c", 
+                 "#fc4e2a", "#ef3b2c", "#cb181d")
+
+set.seed(10)
+#We are creating a map in which the NILs are colored differently based on the LQs of each of the top 10 ethnic groups
+ggplot(merged_map_LQ, aes(x = long, y = lat, group = group, fill = LocationQuotient)) +
+  geom_polygon(color = "black") +
+  facet_wrap(~Cittadinanza, strip.position = "top", ncol = 4) +
+  scale_fill_gradientn(colors = color_scale, 
+                       values = scales::rescale(c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 
+                                                  0.7, 0.85, 1, 1.11, 1.25,
+                                                  1.43, 1.67, 2, 2.5, 3.33, 5, 10))) +
+  theme_void() +
+  coord_map() +
+  labs(title = "Fig.11 - % of foreigners 
+       by NIL (2022)") +
+  theme(
+    legend.title = element_blank(),  
+    axis.title.x = element_blank(),   
+    axis.title.y = element_blank(),   
+    axis.text.x = element_blank(),    
+    axis.text.y = element_blank(),
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 20),
+    legend.text = element_text(size=8)
+    ) 
+ggsave("LQ.png", width = 12, height = 6, dpi = 300)
