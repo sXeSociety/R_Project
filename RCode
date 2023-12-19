@@ -8,7 +8,7 @@ library(ineq)
 library(broom)
 #To import .sav
 library(foreign)
-data_ <- read.spss("C:/Users/andre/OneDrive/Desktop/Tesi/Senzatitolo2.sav", to.data.frame = TRUE) 
+data_ <- read.spss("C:/Users/andre/OneDrive/Documenti/R_Project/ComuneDiMilano.sav", to.data.frame = TRUE) 
 
 #We want to take a look at the format of the variables in the dataframe in order to know if we need to manipulate them while proceeding.
 summary(data_)
